@@ -180,22 +180,15 @@ deploy_tftp() {
 }
 
 deploy_nfs_rootfs() {
-  echo "[*] Deploying rootfs to NFS (${NFS_DIR}) using mode: ${ROOTFS_MODE}"
-  case "${ROOTFS_MODE}" in
-    rsync)
-      [[ -d "${OUTDIR_RESOLVED}/target" ]] || { echo "ERROR: Missing target dir: ${OUTDIR_RESOLVED}/target" >&2; exit 1; }
-      rsync -aHAX --delete "${OUTDIR_RESOLVED}/target/" "${NFS_DIR}/"
-      ;;
-    tar)
-      [[ -f "${OUTDIR_RESOLVED}/images/rootfs.tar" ]] || { echo "ERROR: Missing rootfs.tar: ${OUTDIR_RESOLVED}/images/rootfs.tar" >&2; exit 1; }
-      rm -rf "${NFS_DIR:?}/"*
-      tar -xpf "${OUTDIR_RESOLVED}/images/rootfs.tar" -C "${NFS_DIR}"
-      ;;
-    *)
-      echo "ERROR: Unknown ROOTFS_MODE=${ROOTFS_MODE} (use rsync or tar)" >&2
-      exit 1
-      ;;
-  esac
+  echo "[*] Deploying rootfs to NFS (${NFS_DIR}) using mode: tar"
+
+  [[ -f "${OUTDIR_RESOLVED}/images/rootfs.tar" ]] || {
+    echo "ERROR: Missing rootfs.tar: ${OUTDIR_RESOLVED}/images/rootfs.tar" >&2
+    exit 1
+  }
+
+  sudo rm -rf "${NFS_DIR:?}/"*
+  sudo tar -xpf "${OUTDIR_RESOLVED}/images/rootfs.tar" -C "${NFS_DIR}"
   sync
 }
 
