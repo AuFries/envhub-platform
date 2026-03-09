@@ -1,0 +1,11 @@
+#!/bin/sh
+
+case "$1" in
+  start)
+    # # Set default routing path and DNS servers for NTP to work
+    mkdir -p /run
+    ip route add default via 192.168.7.1 dev eth0 2>/dev/null
+    echo "nameserver 8.8.8.8" > /run/resolv.conf
+    echo "nameserver 1.1.1.1" >> /run/resolv.conf
+    ;;
+esac
