@@ -6,7 +6,12 @@
     #address-cells = <1>;
     #size-cells = <0>;
     clock-frequency = <50000>;
-    
+
+    battery_gauge: fuel-gauge@55 {
+        compatible = "ti,bq27441";
+        reg = <0x55>;
+    };
+
     scd30@61 { 
         compatible = "sensirion,scd30"; reg = <0x61>; 
     };

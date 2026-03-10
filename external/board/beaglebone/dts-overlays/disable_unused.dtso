@@ -4,3 +4,7 @@
 &rtc { // External DS1307 is used as the RTC
     status = "disabled";
 };
+
+&cape_eeprom1 { // I2C address collides with battery babysitter
+    status = "disabled";
+};
