@@ -427,7 +427,6 @@
 #define LV_OBJ_STYLE_CACHE      0
 
 #define LV_USE_OBJ_NAME 1
-#define LV_USE_XML 1
 
 /** Add `id` field to `lv_obj_t` */
 #define LV_USE_OBJ_ID           0
