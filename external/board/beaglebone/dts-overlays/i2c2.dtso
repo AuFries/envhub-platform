@@ -5,12 +5,19 @@
     status = "okay";
     #address-cells = <1>;
     #size-cells = <0>;
+    clock-frequency = <50000>;
+    
+    scd30@61 { 
+        compatible = "sensirion,scd30"; reg = <0x61>; 
+    };
 
-    scd30@61 { compatible = "sensirion,scd30"; reg = <0x61>; };
+    sgp30@58 { 
+        compatible = "sensirion,sgp30"; reg = <0x58>; 
+    };
 
-    sgp30@58 { compatible = "sensirion,sgp30"; reg = <0x58>; };
-
-    bmp580@47 { compatible = "bosch,bmp580";  reg = <0x47>; };
+    bmp580@47 { 
+        compatible = "bosch,bmp580";  reg = <0x47>; 
+    };
 
     peripheral_ina219: ina219-peripheral@40 { // Peripheral current monitor
         compatible = "ti,ina219";     

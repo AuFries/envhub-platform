@@ -1,0 +1,44 @@
+--- a/drivers/iio/chemical/scd30_core.c
++++ b/drivers/iio/chemical/scd30_core.c
+@@ -706,9 +706,12 @@
+ 	if (ret)
+ 		return ret;
+ 
++	/* Temporarily skip reset entirely */
++	/*
+ 	ret = scd30_reset(state);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "failed to reset device\n");
++	*/
+ 
+ 	if (state->irq > 0) {
+ 		ret = scd30_setup_trigger(indio_dev);
+@@ -725,17 +728,17 @@
+ 		return dev_err_probe(dev, ret, "failed to read firmware version\n");
+ 	dev_info(dev, "firmware version: %d.%d\n", val >> 8, (char)val);
+ 
+-	ret = scd30_command_write(state, CMD_MEAS_INTERVAL, state->meas_interval);
+-	if (ret)
+-		return dev_err_probe(dev, ret, "failed to set measurement interval\n");
+-
+-	ret = scd30_command_write(state, CMD_START_MEAS, state->pressure_comp);
+-	if (ret)
+-		return dev_err_probe(dev, ret, "failed to start measurement\n");
+-
+-	ret = devm_add_action_or_reset(dev, scd30_stop_meas, state);
+-	if (ret)
+-		return ret;
++	// ret = scd30_command_write(state, CMD_MEAS_INTERVAL, state->meas_interval);
++	// if (ret)
++	// 	return dev_err_probe(dev, ret, "failed to set measurement interval\n");
++
++	// ret = scd30_command_write(state, CMD_START_MEAS, state->pressure_comp);
++	// if (ret)
++	// 	return dev_err_probe(dev, ret, "failed to start measurement\n");
++
++	// ret = devm_add_action_or_reset(dev, scd30_stop_meas, state);
++	// if (ret)
++		// return ret;
+ 
+ 	return devm_iio_device_register(dev, indio_dev);
+ }
