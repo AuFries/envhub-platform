@@ -1,0 +1,261 @@
+#!/bin/sh
+# bq27441-init
+# BusyBox/ash-friendly initializer for TI BQ27441-G1A
+#
+# Default values below are the nearest *in-spec* values for a 10.05Ah pack,
+# because BQ27441-G1A officially tops out at 8000mAh / 32767mWh.
+#
+# Override on the command line, e.g.:
+#   BUS=2 ADDR=0x55 TAPER_CURRENT_MA=100 /usr/sbin/bq27441-init
+#
+# Exit codes:
+#   0 = success / nothing to do
+#   1 = fatal error
+#
+# Requires: i2cget, i2cset
+
+set -eu
+
+BUS="${BUS:-2}"
+ADDR="${ADDR:-0x55}"
+DEV_ID="${DEV_ID:-2-0055}"
+DRIVER="${DRIVER:-bq27xxx-battery}"
+
+# Gauge parameters
+DESIGN_CAPACITY_MAH="${DESIGN_CAPACITY_MAH:-8000}"   # nearest in-spec approx
+DESIGN_ENERGY_MWH="${DESIGN_ENERGY_MWH:-29600}"      # 8000 * 3.7
+TERMINATE_VOLTAGE_MV="${TERMINATE_VOLTAGE_MV:-3000}" # adjust if your system cutoff differs
+
+# Must match your charger's charge-termination threshold current, not just "charge current".
+# TI formula: Taper Rate = Design Capacity / (0.1 * Taper Current)
+: "${TAPER_CURRENT_MA:?Set TAPER_CURRENT_MA to your charger termination current in mA}"
+
+FORCE="${FORCE:-0}"     # set to 1 to program even when ITPOR is clear
+RESEAL="${RESEAL:-0}"   # set to 1 to seal again after programming
+
+log() { echo "bq27441-init: $*"; }
+err() { echo "bq27441-init: ERROR: $*" >&2; exit 1; }
+
+need_cmd() {
+    command -v "$1" >/dev/null 2>&1 || err "missing required command: $1"
+}
+
+need_cmd i2cget
+need_cmd i2cset
+
+# Sanity checks
+[ "$DESIGN_CAPACITY_MAH" -gt 0 ] || err "DESIGN_CAPACITY_MAH must be > 0"
+[ "$DESIGN_ENERGY_MWH" -gt 0 ] || err "DESIGN_ENERGY_MWH must be > 0"
+[ "$TERMINATE_VOLTAGE_MV" -ge 2500 ] || err "TERMINATE_VOLTAGE_MV too low"
+[ "$TERMINATE_VOLTAGE_MV" -le 3700 ] || err "TERMINATE_VOLTAGE_MV too high"
+[ "$TAPER_CURRENT_MA" -gt 0 ] || err "TAPER_CURRENT_MA must be > 0"
+
+# BQ27441-G1A documented limits
+if [ "$DESIGN_CAPACITY_MAH" -gt 8000 ]; then
+    err "DESIGN_CAPACITY_MAH=$DESIGN_CAPACITY_MAH exceeds BQ27441-G1A documented max of 8000 mAh"
+fi
+if [ "$DESIGN_ENERGY_MWH" -gt 32767 ]; then
+    err "DESIGN_ENERGY_MWH=$DESIGN_ENERGY_MWH exceeds documented max of 32767 mWh"
+fi
+
+# Taper Rate = DesignCapacity / (0.1 * TaperCurrent) = 10 * DC / taper_current
+TAPER_RATE=$(( (10 * DESIGN_CAPACITY_MAH + TAPER_CURRENT_MA - 1) / TAPER_CURRENT_MA ))
+[ "$TAPER_RATE" -gt 0 ] || err "computed TAPER_RATE invalid"
+[ "$TAPER_RATE" -le 2000 ] || err "computed TAPER_RATE=$TAPER_RATE exceeds documented max of 2000"
+
+# ---------- Low-level helpers ----------
+
+hex2dec() {
+    # accepts strings like 0x1f
+    printf '%d' "$1"
+}
+
+readb() {
+    i2cget -y "$BUS" "$ADDR" "$1" b
+}
+
+writeb() {
+    i2cset -y "$BUS" "$ADDR" "$1" "$2" b
+}
+
+# Writes to Control() registers 0x00 / 0x01 explicitly, low byte first, then high byte.
+control_write_word() {
+    lo=$(( $1 & 0xff ))
+    hi=$(( ($1 >> 8) & 0xff ))
+    writeb 0x00 "$(printf '0x%02x' "$lo")"
+    writeb 0x01 "$(printf '0x%02x' "$hi")"
+}
+
+control_read_word() {
+    # issue CONTROL_STATUS or other subcommand first if needed
+    lo=$(hex2dec "$(readb 0x00)")
+    hi=$(hex2dec "$(readb 0x01)")
+    echo $(( (hi << 8) | lo ))
+}
+
+write_u16_be_block() {
+    # block data memory is MSB then LSB at adjacent addresses
+    reg="$1"
+    val="$2"
+    msb=$(( (val >> 8) & 0xff ))
+    lsb=$(( val & 0xff ))
+    writeb "$reg" "$(printf '0x%02x' "$msb")"
+    writeb "$(printf '0x%02x' $(( $(hex2dec "$reg") + 1 )))" "$(printf '0x%02x' "$lsb")"
+}
+
+read_flags() {
+    lo=$(hex2dec "$(readb 0x06)")
+    hi=$(hex2dec "$(readb 0x07)")
+    echo $(( (hi << 8) | lo ))
+}
+
+cfgupmode_set() {
+    flags=$(read_flags)
+    [ $(( flags & 0x0010 )) -ne 0 ]
+}
+
+itpor_set() {
+    flags=$(read_flags)
+    [ $(( flags & 0x0020 )) -ne 0 ]
+}
+
+driver_unbind() {
+    if [ -e "/sys/bus/i2c/drivers/$DRIVER/unbind" ] && [ -L "/sys/bus/i2c/devices/$DEV_ID/driver" ]; then
+        log "unbinding kernel driver $DRIVER from $DEV_ID"
+        echo "$DEV_ID" > "/sys/bus/i2c/drivers/$DRIVER/unbind"
+        sleep 1
+    fi
+}
+
+driver_bind() {
+    if [ -e "/sys/bus/i2c/drivers/$DRIVER/bind" ] && [ -e "/sys/bus/i2c/devices/$DEV_ID" ]; then
+        log "rebinding kernel driver $DRIVER to $DEV_ID"
+        echo "$DEV_ID" > "/sys/bus/i2c/drivers/$DRIVER/bind" || true
+        sleep 1
+    fi
+}
+
+compute_block_checksum() {
+    sum=0
+    reg=64  # 0x40
+    while [ "$reg" -le 95 ]; do   # 0x5F
+        byte=$(hex2dec "$(readb "$(printf '0x%02x' "$reg")")")
+        sum=$(( (sum + byte) & 0xff ))
+        reg=$(( reg + 1 ))
+    done
+    echo $(( 255 - sum ))
+}
+
+was_sealed() {
+    # CONTROL_STATUS subcommand 0x0000, then read back 0x00/0x01
+    control_write_word 0x0000
+    st=$(control_read_word)
+    # CONTROL_STATUS high-byte bit5 = SS
+    [ $(( st & 0x2000 )) -ne 0 ]
+}
+
+unseal() {
+    # unseal key is 0x8000 twice
+    control_write_word 0x8000
+    control_write_word 0x8000
+    sleep 1
+}
+
+enter_cfgupdate() {
+    control_write_word 0x0013  # SET_CFGUPDATE
+    i=0
+    while [ "$i" -lt 20 ]; do
+        if cfgupmode_set; then
+            return 0
+        fi
+        i=$(( i + 1 ))
+        sleep 1
+    done
+    return 1
+}
+
+exit_cfgupdate_soft_reset() {
+    control_write_word 0x0042  # SOFT_RESET
+    i=0
+    while [ "$i" -lt 20 ]; do
+        if ! cfgupmode_set; then
+            return 0
+        fi
+        i=$(( i + 1 ))
+        sleep 1
+    done
+    return 1
+}
+
+seal() {
+    control_write_word 0x0020
+    sleep 1
+}
+
+cleanup() {
+    driver_bind
+}
+trap cleanup EXIT INT TERM
+
+# ---------- Main ----------
+
+log "starting on bus=$BUS addr=$ADDR dev=$DEV_ID"
+log "target params: DC=${DESIGN_CAPACITY_MAH}mAh DE=${DESIGN_ENERGY_MWH}mWh TV=${TERMINATE_VOLTAGE_MV}mV TR=${TAPER_RATE}"
+
+# If the kernel driver is bound, get out of its way first.
+driver_unbind
+
+# Decide whether programming is needed.
+if itpor_set; then
+    log "ITPOR is set: RAM defaults active, programming required"
+else
+    if [ "$FORCE" -ne 1 ]; then
+        log "ITPOR is clear: assuming gauge already configured; nothing to do"
+        exit 0
+    fi
+    log "FORCE=1: programming even though ITPOR is clear"
+fi
+
+SEALED_BEFORE=0
+if was_sealed; then
+    SEALED_BEFORE=1
+    log "gauge appears sealed; unsealing"
+    unseal
+else
+    log "gauge already unsealed"
+fi
+
+log "entering CONFIG UPDATE mode"
+enter_cfgupdate || err "failed to enter CONFIG UPDATE mode"
+
+# Enable block data access, select State subclass 82, block 0
+writeb 0x61 0x00
+writeb 0x3E 0x52
+writeb 0x3F 0x00
+
+# Write the four minimum parameters TI calls out.
+# State subclass offsets:
+#   Design Capacity  -> 0x4A/0x4B (offset 10)
+#   Design Energy    -> 0x4C/0x4D (offset 12)
+#   Terminate Voltage-> 0x50/0x51 (offset 16)
+#   Taper Rate       -> 0x5B/0x5C (offset 27)
+write_u16_be_block 0x4A "$DESIGN_CAPACITY_MAH"
+write_u16_be_block 0x4C "$DESIGN_ENERGY_MWH"
+write_u16_be_block 0x50 "$TERMINATE_VOLTAGE_MV"
+write_u16_be_block 0x5B "$TAPER_RATE"
+
+# Recompute and write block checksum
+CHKSUM=$(compute_block_checksum)
+writeb 0x60 "$(printf '0x%02x' "$CHKSUM")"
+log "wrote checksum 0x$(printf '%02x' "$CHKSUM")"
+
+log "exiting CONFIG UPDATE via SOFT_RESET"
+exit_cfgupdate_soft_reset || err "failed to exit CONFIG UPDATE mode cleanly"
+
+if [ "$RESEAL" -eq 1 ] || [ "$SEALED_BEFORE" -eq 1 ]; then
+    log "resealing gauge"
+    seal
+fi
+
+log "done"
+exit 0
