@@ -8,17 +8,27 @@
     spi0_pins: pinmux_spi0_pins {
         pinctrl-single,pins = <
             AM33XX_IOPAD(AM335X_PIN_SPI0_SCLK, PIN_INPUT_PULLUP | MUX_MODE0) /* P9_22 (SCLK) */
-            AM33XX_IOPAD(AM335X_PIN_SPI0_D0, PIN_INPUT_PULLUP | MUX_MODE0)   /* P9_21 (MISO) */
-            AM33XX_IOPAD(AM335X_PIN_SPI0_D1, PIN_OUTPUT_PULLUP | MUX_MODE0)  /* P9_18 (MOSI) */
-            AM33XX_IOPAD(AM335X_PIN_SPI0_CS0, PIN_OUTPUT_PULLUP | MUX_MODE0) /* P9_17 (CS0)  */
+            AM33XX_IOPAD(AM335X_PIN_SPI0_D0,   PIN_INPUT_PULLUP | MUX_MODE0) /* P9_21 (MISO) */
+            AM33XX_IOPAD(AM335X_PIN_SPI0_D1,   PIN_OUTPUT_PULLUP | MUX_MODE0) /* P9_18 (MOSI) */
+            AM33XX_IOPAD(AM335X_PIN_SPI0_CS0,  PIN_OUTPUT_PULLUP | MUX_MODE0) /* P9_17 (CS0) */
         >;
     };
 
     ili9341_ctrl_pins: pinmux_ili9341_ctrl_pins {
         pinctrl-single,pins = <
-            AM33XX_IOPAD(AM335X_PIN_GPMC_AD13, PIN_OUTPUT | MUX_MODE7) /* GPIO2_6 (D/C)   */
-            AM33XX_IOPAD(AM335X_PIN_GPMC_AD12, PIN_OUTPUT | MUX_MODE7) /* GPIO2_7 (RESET) */
+            AM33XX_IOPAD(AM335X_PIN_GPMC_AD13, PIN_OUTPUT | MUX_MODE7)   /* D/C */
+            AM33XX_IOPAD(AM335X_PIN_GPMC_AD12, PIN_OUTPUT | MUX_MODE7)   /* RESET */
+            AM33XX_IOPAD(AM335X_PIN_GPMC_BEN1, PIN_OUTPUT | MUX_MODE7)   /* P9_12 = GPIO1_28, backlight */
         >;
+    };
+};
+
+&{/} {
+    ili9341_bl: backlight {
+        compatible = "gpio-backlight";
+        gpios = <&gpio1 28 GPIO_ACTIVE_HIGH>; /* P9_12 */
+        default-on;
+        status = "okay";
     };
 };
 
@@ -34,8 +44,9 @@
 
         spi-max-frequency = <2000000>;
 
-        dc-gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>; // P8_12
-        reset-gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>; // P8_11
+        dc-gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
+        backlight = <&ili9341_bl>;
 
         rotation = <0>;
         status = "okay";
