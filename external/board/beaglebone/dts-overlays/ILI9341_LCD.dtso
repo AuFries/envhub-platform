@@ -2,38 +2,57 @@
 /plugin/;
 
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/pinctrl/am33xx.h>
 
 &am33xx_pinmux {
     spi0_pins: pinmux_spi0_pins {
         pinctrl-single,pins = <
-            AM33XX_IOPAD(AM335X_PIN_SPI0_SCLK, PIN_INPUT_PULLUP | MUX_MODE0) /* P9_22 (SCLK) */
-            AM33XX_IOPAD(AM335X_PIN_SPI0_D0,   PIN_INPUT_PULLUP | MUX_MODE0) /* P9_21 (MISO) */
+            AM33XX_IOPAD(AM335X_PIN_SPI0_SCLK, PIN_INPUT_PULLUP  | MUX_MODE0) /* P9_22 (SCLK) */
+            AM33XX_IOPAD(AM335X_PIN_SPI0_D0,   PIN_INPUT_PULLUP  | MUX_MODE0) /* P9_21 (MISO) */
             AM33XX_IOPAD(AM335X_PIN_SPI0_D1,   PIN_OUTPUT_PULLUP | MUX_MODE0) /* P9_18 (MOSI) */
-            AM33XX_IOPAD(AM335X_PIN_SPI0_CS0,  PIN_OUTPUT_PULLUP | MUX_MODE0) /* P9_17 (CS0) */
+            AM33XX_IOPAD(AM335X_PIN_SPI0_CS0,  PIN_OUTPUT_PULLUP | MUX_MODE0) /* P9_17 (CS0)  */
         >;
     };
 
     ili9341_ctrl_pins: pinmux_ili9341_ctrl_pins {
         pinctrl-single,pins = <
-            AM33XX_IOPAD(AM335X_PIN_GPMC_AD13, PIN_OUTPUT | MUX_MODE7)   /* D/C */
-            AM33XX_IOPAD(AM335X_PIN_GPMC_AD12, PIN_OUTPUT | MUX_MODE7)   /* RESET */
-            AM33XX_IOPAD(AM335X_PIN_GPMC_BEN1, PIN_OUTPUT | MUX_MODE7)   /* P9_12 = GPIO1_28, backlight */
+            AM33XX_IOPAD(AM335X_PIN_GPMC_AD13, PIN_OUTPUT | MUX_MODE7) /* D/C   */
+            AM33XX_IOPAD(AM335X_PIN_GPMC_AD12, PIN_OUTPUT | MUX_MODE7) /* RESET */
+        >;
+    };
+
+    lcd_backlight_pwm_pins: pinmux_lcd_backlight_pwm_pins {
+        pinctrl-single,pins = <
+            AM33XX_IOPAD(AM335X_PIN_GPMC_A2, PIN_OUTPUT | MUX_MODE6) /* P9_14 = EHRPWM1A */
         >;
     };
 };
 
 &{/} {
     ili9341_bl: backlight {
-        compatible = "gpio-backlight";
-        gpios = <&gpio1 28 GPIO_ACTIVE_HIGH>; /* P9_12 */
-        default-on;
+        compatible = "pwm-backlight";
+        pwms = <&ehrpwm1 0 50000 0>;
+        brightness-levels = <0 4 8 16 32 64 128 255>;
+        default-brightness-level = <7>;
         status = "okay";
     };
 };
 
+&epwmss1 {
+    status = "okay";
+};
+
+&ehrpwm1 {
+    status = "okay";
+    pinctrl-names = "default";
+    pinctrl-0 = <&lcd_backlight_pwm_pins>;
+};
+
 &spi0 {
     status = "okay";
+    #address-cells = <1>;
+    #size-cells = <0>;
     pinctrl-names = "default";
     pinctrl-0 = <&spi0_pins &ili9341_ctrl_pins>;
 
@@ -41,7 +60,6 @@
         compatible = "adafruit,yx240qv29", "ilitek,ili9341";
         reg = <0>;
         write-only;
-
         spi-max-frequency = <5000000>;
 
         dc-gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;
@@ -49,6 +67,28 @@
         backlight = <&ili9341_bl>;
 
         rotation = <0>;
+        status = "okay";
+    };
+};
+
+&i2c2 {
+    status = "okay";
+    clock-frequency = <100000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    tsc2007@48 {
+        compatible = "ti,tsc2007";
+        reg = <0x48>;
+
+        interrupt-parent = <&gpio2>;
+        interrupts = <1 IRQ_TYPE_EDGE_FALLING>;
+        gpios = <&gpio2 1 GPIO_ACTIVE_LOW>;
+
+        ti,x-plate-ohms = <200>;
+        touchscreen-size-x = <4095>;
+        touchscreen-size-y = <4095>;
+
         status = "okay";
     };
 };
